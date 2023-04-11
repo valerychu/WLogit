@@ -1,0 +1,122 @@
+---
+title: "WLogit package"
+author: "Wencan Zhu"
+date: " "
+output: pdf_document
+vignette: >
+ %\VignetteEngine{knitr::knitr}
+ %\VignetteIndexEntry{WLogit package}
+ %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+library(WLogit)
+library(tibble)
+library(ggplot2)
+set.seed(123456)
+```
+
+# Introduction
+This package provides functions for implementing the variable selection approach in high-dimensional linear models called WLogit described in Zhu et al. (2022). This method is designed for taking into account the correlations that may exist between the predictors (columns of the design matrix). It consists in rewriting the initial high-dimensional logistic regression model to remove the correlation existing between the predictors and in applying the generalized Lasso criterion. We refer the reader to the paper for further details.
+
+Given a design matrix ${\mathbf{X}}$ of size $n\times p$, $X_{j}^{(i)}$ corresponds to the measurement of the $j$th biomarker on sample $i$, and ${\boldsymbol{\beta}}=(\beta_{1},\ldots, \beta_p)^{T}$ is the vector of effect size for each biomarker, with most components equal to zero. We assume that the binary response $y_1,y_2,...,y_n$ are independent random variables having a Bernoulli distribution with parameter $\pi_{{\boldsymbol{\beta}}}(X^{(i)})$ ($y_{i} \sim Bernoulli(\pi_{{\boldsymbol{\beta}}}(X^{(i)}))$), where for all $i$ in $\{1,\dots,n\}$,
+\begin{equation}\label{eq:logistic}
+    \pi_{{\boldsymbol{\beta}}}(X^{(i)})=\frac{\exp\left({\sum_{j=1}^p \beta_j X_j^{(i)}}\right)}{1+\exp\left({\sum_{j=1}^p \beta_j X_j^{(i)}}\right)}.
+\end{equation}
+
+The rows of $\boldsymbol{X}$ are assumed to be the realizations of independent centered Gaussian random vectors having a covariance matrix equal to $\boldsymbol{\Sigma}$.
+The vector $\boldsymbol{\beta}$ is assumed to be sparse, \textit{i.e.} a majority of its components is equal to zero. The goal of the WLoigt approach is to retrieve the indices of the nonzero components of $\boldsymbol{\beta}$, also called active variables. 
+
+# Data generation
+## Correlation matrix $\boldsymbol{\Sigma}$
+We consider a correlation matrix having the following block structure:
+
+\begin{equation}
+     \label{eq:SPAC}
+     \boldsymbol{\Sigma}=
+       \begin{bmatrix}
+         \boldsymbol{\Sigma}_{11} &  \boldsymbol{\Sigma}_{12} \\
+         \boldsymbol{\Sigma}_{12}^{T} &  \boldsymbol{\Sigma}_{22}
+       \end{bmatrix}
+\end{equation}
+      
+where $\boldsymbol{\Sigma}_{11}$ is the correlation matrix of active variables with off-diagonal entries equal to $\alpha_1$, $\boldsymbol{\Sigma}_{22}$ is the one of non active variables with off-diagonal entries equal to $\alpha_3$ and $\boldsymbol{\Sigma}_{12}$ is the correlation matrix between active and non active variables with entries equal to $\alpha_2$. In the following example: $(\alpha_1,\alpha_2,\alpha_3)=(0.3, 0.5, 0.7)$.    
+      
+The first 10 variables are active variables among the $p=500$ variables and $n=100$.
+
+```{r generate Sigma}
+p <- 500 # number of variables 
+d <- 10 # number of actives
+n <- 100 # number of samples
+actives <- c(1:d)
+nonacts <- c(1:p)[-actives]
+Sigma <- matrix(0, p, p)
+Sigma[actives, actives] <- 0.3
+Sigma[-actives, actives] <- 0.5
+Sigma[actives, -actives] <- 0.5
+Sigma[-actives, -actives] <- 0.7
+diag(Sigma) <- rep(1,p)
+```
+
+## Generation of $\boldsymbol{X}$ and $\boldsymbol{y}$
+The design matrix is then generated with the correlation matrix $\boldsymbol{\Sigma}$ previously defined by using the function \texttt{mvrnorm} and the response variable $\boldsymbol{y}$  is generated according to model \eqref{eq:logistic} where the non null components of $\boldsymbol{\beta}$ are equal to 1.
+
+```{r X, eval=FALSE}
+X <- MASS::mvrnorm(n = n, mu=rep(0,p), Sigma, tol = 1e-6, empirical = FALSE)
+beta <- rep(0,p)
+beta[actives] <- 1
+pr <- CalculPx(X,beta=beta)
+y <- rbinom(n,1,pr) 
+```
+
+```{r , echo=FALSE}
+data(X)
+data(y)
+data(beta)
+```
+
+# Variable selection
+With the previous $\boldsymbol{X}$ and $\boldsymbol{y}$, the function \verb|WhiteningLogit| of the package can be used to select the active variables. 
+
+```{r WLogit model, eval=FALSE}
+mod <- WhiteningLogit(X = X, y = y)
+```
+
+```{r , echo=FALSE}
+data(test)
+mod <- test
+```
+Additional arguments:
+
+* \texttt{nlambda}: number of lambda to be considered, the default value is 50.
+* \texttt{gamma}: parameter described in the paper.
+* \texttt{maxit}: integer specifying the maximum number of steps for the iteration in the Iterative Re-weighted Least Square algorithm. Its default value is 100.
+
+Outputs: 
+
+* \texttt{beta}: matrix of the estimations of $\boldsymbol{\beta}$ for all the $\lambda$ considered. 
+* \texttt{beta.min}: estimation of $\boldsymbol{\beta}$ which maximize the log-likelihood.
+* \texttt{log.likelihood}: Log-likelihood for all the $\lambda$ considered.
+* \texttt{lambda}: All $\lambda$ considered.
+
+##  Estimation of $\boldsymbol{\beta}$ by $\widehat{\boldsymbol{\beta}}(\lambda)$ which maximizes the log-likelihood
+```{r variable selection,fig.width=4,fig.height=3}
+beta_min <- mod$beta.min
+df_beta <- data.frame(beta_est=beta_min, Status = ifelse(beta==0, "non-active", "active"))
+df_plot <- df_beta[which(beta_min!=0), ]
+df_plot$index <- which(beta_min!=0)
+ggplot2::ggplot(data=df_plot, mapping=aes(y=beta_est, x=index, color=Status))+geom_point()+
+  theme_bw()+ylab("Estimated coefficients")+xlab("Indices of selected variables")
+```
+
+True Positive Rate: `r sum(which(beta_min!=0) %in% sort(actives))/10` (all active variables identified)
+
+False Positive Rate:  `r sum(which(beta_min!=0) %in% sort(nonacts))`/490 = `r sum(which(beta_min!=0) %in% sort(nonacts))/490`
+
+
+\bigskip
+
+\large \textbf{References}
+
+[1] W. Zhu, C. Lévy-Leduc, N. Ternès. Variable selection in high-dimensional logistic regression models using a whitening approach, 2022, Arxiv: 2206.14850.

@@ -1,0 +1,5 @@
+exportPattern("^[[:alpha:]]+")
+importFrom(genlasso,genlasso)
+importFrom("stats", "as.formula", "coef", "glm", "predict")
+
+import(cvCovEst, Matrix, tibble, MASS, ggplot2, glmnet, corpcor)
